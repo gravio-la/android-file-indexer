@@ -2,6 +2,9 @@
 .gradle/
 build/
 
+# Rust build artifacts
+rust/target/
+
 # Local configuration file (sdk path, etc)
 local.properties
 
