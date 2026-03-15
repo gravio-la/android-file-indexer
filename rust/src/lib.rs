@@ -8,7 +8,7 @@ pub extern "C" fn Java_dev_fileassistant_RustBridge_nativeInit(
     _class: JClass,
 ) {
     android_logger::init_once(
-        android_logger::Config::default().with_min_level(log::Level::Debug),
+        android_logger::Config::default().with_max_level(log::LevelFilter::Debug),
     );
     log::info!("FileAssistant Rust core initialized");
 }

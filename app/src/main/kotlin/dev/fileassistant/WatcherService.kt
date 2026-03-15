@@ -53,7 +53,6 @@ class WatcherService : Service() {
         val watchDir = File(path)
         if (!watchDir.exists()) return
 
-        @Suppress("DEPRECATION")
         fileObserver = object : FileObserver(watchDir, CREATE or CLOSE_WRITE) {
             override fun onEvent(event: Int, relativePath: String?) {
                 if (relativePath == null) return
