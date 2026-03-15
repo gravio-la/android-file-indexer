@@ -1,0 +1,63 @@
+name: Build FileAssistant
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock') }}
+
+      - name: Install NDK and cargo-ndk
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;26.1.10909125"
+          cargo install cargo-ndk
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fileassistant-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/debug/app-debug.apk
+          generate_release_notes: true
