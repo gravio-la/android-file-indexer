@@ -9,6 +9,8 @@
         android:orientation="vertical"
         android:padding="16dp">
 
+        <!-- ── Folder selection ───────────────────────────────────── -->
+
         <TextView
             android:id="@+id/folderUriText"
             android:layout_width="match_parent"
@@ -28,14 +30,33 @@
             android:id="@+id/watchDownloadsButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
+            android:layout_marginBottom="16dp"
             android:text="@string/watch_downloads" />
+
+        <!-- ── All Files Access permission ───────────────────────── -->
+
+        <TextView
+            android:id="@+id/allFilesStatusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/requestAllFilesButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:text="@string/request_all_files" />
+
+        <!-- ── Watch control ──────────────────────────────────────── -->
 
         <Button
             android:id="@+id/toggleWatchButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
+            android:layout_marginBottom="8dp"
             android:text="@string/start_watching" />
 
         <TextView
@@ -45,6 +66,8 @@
             android:layout_marginBottom="16dp"
             android:text="@string/service_stopped"
             android:textSize="14sp" />
+
+        <!-- ── Event log ──────────────────────────────────────────── -->
 
         <TextView
             android:layout_width="match_parent"
@@ -62,6 +85,8 @@
             android:fontFamily="monospace"
             android:text="—"
             android:textSize="11sp" />
+
+        <!-- ── Last proposal ──────────────────────────────────────── -->
 
         <TextView
             android:layout_width="match_parent"
