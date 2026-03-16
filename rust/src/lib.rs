@@ -15,7 +15,7 @@ pub extern "C" fn Java_dev_fileassistant_RustBridge_nativeInit(
 
 #[no_mangle]
 pub extern "C" fn Java_dev_fileassistant_RustBridge_nativeClassify(
-    env: JNIEnv,
+    mut env: JNIEnv,
     _class: JClass,
     path: JString,
 ) -> jstring {
@@ -26,7 +26,7 @@ pub extern "C" fn Java_dev_fileassistant_RustBridge_nativeClassify(
 
 #[no_mangle]
 pub extern "C" fn Java_dev_fileassistant_RustBridge_nativeOnFileEvent(
-    env: JNIEnv,
+    mut env: JNIEnv,
     _class: JClass,
     event_type: JString,
     path: JString,
