@@ -11,7 +11,9 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.IBinder
+import android.provider.Settings
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -32,12 +34,17 @@ class MainActivity : AppCompatActivity() {
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
-            val binder = service as WatcherService.LocalBinder
-            watcherService = binder.getService()
+            watcherService = (service as WatcherService.LocalBinder).getService()
             serviceBound = true
             bindRequested = false
             pendingWatchAction?.invoke()
             pendingWatchAction = null
+            // Sync button state if the service was already watching (e.g. after boot-restart)
+            if (watcherService?.isWatching == true && !isWatching) {
+                isWatching = true
+                binding.toggleWatchButton.text = getString(R.string.stop_watching)
+                binding.serviceStatusText.text = getString(R.string.service_running)
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
@@ -49,16 +56,16 @@ class MainActivity : AppCompatActivity() {
 
     private val proposalReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val json = intent.getStringExtra(WatcherService.EXTRA_PROPOSAL_JSON) ?: return
-            binding.proposalText.text = json
+            binding.proposalText.text =
+                intent.getStringExtra(WatcherService.EXTRA_PROPOSAL_JSON) ?: return
         }
     }
 
     private val fileEventReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val log = intent.getStringExtra(WatcherService.EXTRA_EVENT_LOG) ?: return
+            val msg = intent.getStringExtra(WatcherService.EXTRA_EVENT_LOG) ?: return
             if (eventLog.size >= 20) eventLog.removeFirst()
-            eventLog.addLast(log)
+            eventLog.addLast(msg)
             binding.eventLogText.text = eventLog.joinToString("\n")
         }
     }
@@ -70,30 +77,40 @@ class MainActivity : AppCompatActivity() {
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
-                storeWatchUri(uri)
-                storeWatchMode(WatchMode.SAF)
+                prefs().edit()
+                    .putString(WatcherService.PREF_WATCH_MODE, WatcherService.WATCH_MODE_SAF)
+                    .putString(WatcherService.PREF_WATCH_URI, uri.toString())
+                    .apply()
                 binding.folderUriText.text = uri.toString()
             }
         }
 
-    private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* graceful */ }
+    private val notificationPermLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
-    private val mediaPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { /* graceful */ }
+    private val mediaPermLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+
+    private val allFilesLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            updateAllFilesAccessStatus()
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        requestNotificationPermissionIfNeeded()
+        requestNotificationPermIfNeeded()
 
-        val storedUri = loadWatchUri()
-        if (storedUri != null) {
-            binding.folderUriText.text = storedUri.toString()
-        } else if (loadWatchMode() == WatchMode.DOWNLOADS) {
-            binding.folderUriText.text = getString(R.string.downloads_folder)
+        // Restore displayed folder label
+        val p = prefs()
+        when (p.getString(WatcherService.PREF_WATCH_MODE, null)) {
+            WatcherService.WATCH_MODE_SAF ->
+                binding.folderUriText.text =
+                    p.getString(WatcherService.PREF_WATCH_URI, null) ?: getString(R.string.no_folder)
+            WatcherService.WATCH_MODE_DOWNLOADS ->
+                binding.folderUriText.text = getString(R.string.downloads_folder)
         }
 
         binding.chooseFolderButton.setOnClickListener {
@@ -101,9 +118,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.watchDownloadsButton.setOnClickListener {
-            requestMediaPermissionsIfNeeded()
-            storeWatchMode(WatchMode.DOWNLOADS)
+            requestMediaPermsIfNeeded()
+            prefs().edit()
+                .putString(WatcherService.PREF_WATCH_MODE, WatcherService.WATCH_MODE_DOWNLOADS)
+                .apply()
             binding.folderUriText.text = getString(R.string.downloads_folder)
+        }
+
+        binding.requestAllFilesButton.setOnClickListener {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                allFilesLauncher.launch(
+                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:$packageName"))
+                )
+            }
         }
 
         binding.toggleWatchButton.setOnClickListener {
@@ -117,6 +145,7 @@ class MainActivity : AppCompatActivity() {
         lbm.registerReceiver(proposalReceiver, IntentFilter(WatcherService.ACTION_PROPOSAL))
         lbm.registerReceiver(fileEventReceiver, IntentFilter(WatcherService.ACTION_FILE_EVENT))
         bindWatcherService()
+        updateAllFilesAccessStatus()
     }
 
     override fun onPause() {
@@ -136,16 +165,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startWatching() {
-        val serviceIntent = Intent(this, WatcherService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
+        val p = prefs()
+        val mode = p.getString(WatcherService.PREF_WATCH_MODE, null) ?: return
+        val uri  = p.getString(WatcherService.PREF_WATCH_URI, null)?.let { Uri.parse(it) }
+        if (mode == WatcherService.WATCH_MODE_SAF && uri == null) return
 
-        val mode = loadWatchMode()
-        val uri = if (mode == WatchMode.SAF) loadWatchUri() ?: return else null
-        val action: () -> Unit = if (mode == WatchMode.DOWNLOADS) {
+        val serviceIntent = Intent(this, WatcherService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+        else startService(serviceIntent)
+
+        val action: () -> Unit = if (mode == WatcherService.WATCH_MODE_DOWNLOADS) {
             { watcherService?.startWatchingDownloads() }
         } else {
             { watcherService?.startWatchingUri(uri!!) }
@@ -176,57 +205,43 @@ class MainActivity : AppCompatActivity() {
     private fun bindWatcherService() {
         if (!serviceBound && !bindRequested) {
             bindRequested = true
-            val intent = Intent(this, WatcherService::class.java)
-            bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+            bindService(Intent(this, WatcherService::class.java),
+                serviceConnection, Context.BIND_AUTO_CREATE)
         }
     }
 
-    private fun storeWatchUri(uri: Uri) {
-        getPreferences(Context.MODE_PRIVATE).edit()
-            .putString("watch_uri", uri.toString())
-            .apply()
-    }
-
-    private fun loadWatchUri(): Uri? {
-        val s = getPreferences(Context.MODE_PRIVATE).getString("watch_uri", null)
-        return s?.let { Uri.parse(it) }
-    }
-
-    private enum class WatchMode { SAF, DOWNLOADS }
-
-    private fun storeWatchMode(mode: WatchMode) {
-        getPreferences(Context.MODE_PRIVATE).edit()
-            .putString("watch_mode", mode.name)
-            .apply()
-    }
-
-    private fun loadWatchMode(): WatchMode {
-        val name = getPreferences(Context.MODE_PRIVATE).getString("watch_mode", null)
-        return if (name == WatchMode.DOWNLOADS.name) WatchMode.DOWNLOADS else WatchMode.SAF
-    }
-
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
+    private fun updateAllFilesAccessStatus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val granted = Environment.isExternalStorageManager()
+            binding.allFilesStatusText.text = getString(
+                if (granted) R.string.all_files_granted else R.string.all_files_not_granted
+            )
+            binding.requestAllFilesButton.isEnabled = !granted
+        } else {
+            binding.allFilesStatusText.text = getString(R.string.all_files_not_needed)
+            binding.requestAllFilesButton.isEnabled = false
         }
     }
 
-    private fun requestMediaPermissionsIfNeeded() {
+    private fun prefs() = getSharedPreferences(WatcherService.PREFS_NAME, Context.MODE_PRIVATE)
+
+    private fun requestNotificationPermIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    private fun requestMediaPermsIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val needed = listOf(
                 Manifest.permission.READ_MEDIA_IMAGES,
                 Manifest.permission.READ_MEDIA_VIDEO,
                 Manifest.permission.READ_MEDIA_AUDIO
-            ).filter {
-                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-            }
-            if (needed.isNotEmpty()) {
-                mediaPermissionLauncher.launch(needed.toTypedArray())
-            }
+            ).filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+            if (needed.isNotEmpty()) mediaPermLauncher.launch(needed.toTypedArray())
         }
     }
 }
