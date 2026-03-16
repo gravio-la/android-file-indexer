@@ -5,6 +5,9 @@
     <string name="start_watching">Start Watching</string>
     <string name="stop_watching">Stop Watching</string>
     <string name="no_folder">No folder selected</string>
+    <string name="watch_downloads">Watch Downloads (MediaStore)</string>
+    <string name="downloads_folder">Downloads (MediaStore)</string>
+    <string name="event_log_label">File events (last 20):</string>
     <string name="last_proposal">Last proposal:</string>
     <string name="service_running">Service: Running</string>
     <string name="service_stopped">Service: Stopped</string>
