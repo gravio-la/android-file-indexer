@@ -9,31 +9,67 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <!-- ── Folder selection ───────────────────────────────────── -->
+        <!-- ═══════════════════ WATCHED DIRECTORIES ══════════════════════════ -->
 
-        <TextView
-            android:id="@+id/folderUriText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:text="@string/no_folder"
-            android:textSize="14sp" />
-
-        <Button
-            android:id="@+id/chooseFolderButton"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
-            android:text="@string/choose_folder" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/watchDownloadsButton"
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/dirs_section"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/toggleDirsButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:text="@string/show_hide"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- Directory rows added programmatically -->
+        <LinearLayout
+            android:id="@+id/dirsContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:orientation="vertical"
+            android:visibility="gone" />
+
+        <!-- Add-directory buttons -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
-            android:text="@string/watch_downloads" />
+            android:orientation="horizontal">
 
-        <!-- ── All Files Access permission ───────────────────────── -->
+            <Button
+                android:id="@+id/addSafButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="1"
+                android:text="@string/add_saf_folder"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/addDownloadsButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/add_downloads"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- ═══════════════════ ALL-FILES PERMISSION ═════════════════════════ -->
 
         <TextView
             android:id="@+id/allFilesStatusText"
@@ -48,16 +84,34 @@
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
             style="@style/Widget.Material3.Button.OutlinedButton"
-            android:text="@string/request_all_files" />
+            android:text="@string/request_all_files"
+            android:textSize="12sp" />
 
-        <!-- ── Watch control ──────────────────────────────────────── -->
+        <!-- ═══════════════════ WATCH CONTROL ════════════════════════════════ -->
 
-        <Button
-            android:id="@+id/toggleWatchButton"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:text="@string/start_watching" />
+            android:layout_marginBottom="4dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/toggleWatchButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="1"
+                android:text="@string/start_watching" />
+
+            <Button
+                android:id="@+id/scanNowButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:text="@string/scan_now"
+                android:textSize="12sp" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/serviceStatusText"
@@ -65,15 +119,15 @@
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
             android:text="@string/service_stopped"
-            android:textSize="14sp" />
+            android:textSize="13sp" />
 
-        <!-- ── Event log ──────────────────────────────────────────── -->
+        <!-- ═══════════════════ LIVE EVENT LOG ═══════════════════════════════ -->
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
-            android:text="@string/event_log_label"
+            android:text="@string/live_log_label"
             android:textSize="12sp"
             android:textStyle="bold" />
 
@@ -86,7 +140,78 @@
             android:text="—"
             android:textSize="11sp" />
 
-        <!-- ── Last proposal ──────────────────────────────────────── -->
+        <!-- ═══════════════════ RECENT FILES ══════════════════════════════════ -->
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp"
+            android:text="@string/recent_files_label"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/recentFilesText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:fontFamily="monospace"
+            android:text="—"
+            android:textSize="11sp" />
+
+        <!-- ═══════════════════ DEBUG LOG ═════════════════════════════════════ -->
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/debug_log_label"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/clearDebugButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:text="@string/clear"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/toggleDebugButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:text="@string/show_hide"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/debugContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/debugLogText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="—"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- ═══════════════════ LAST PROPOSAL ════════════════════════════════ -->
 
         <TextView
             android:layout_width="match_parent"

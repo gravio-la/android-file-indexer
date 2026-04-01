@@ -1,20 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">FileAssistant</string>
-    <string name="choose_folder">Choose watch folder (SAF)</string>
-    <string name="watch_downloads">Watch Downloads (MediaStore / direct)</string>
-    <string name="downloads_folder">Downloads</string>
-    <string name="request_all_files">Grant All Files Access (needed for Downloads)</string>
-    <string name="all_files_granted">✓ All Files Access granted — Downloads polled directly</string>
+
+    <!-- Directories section -->
+    <string name="dirs_section">Watched Directories</string>
+    <string name="show_hide">Show / Hide</string>
+    <string name="add_saf_folder">+ SAF Folder</string>
+    <string name="add_downloads">+ Downloads</string>
+    <string name="no_dirs_yet">No directories configured yet</string>
+
+    <!-- Permission -->
+    <string name="all_files_granted">✓ All Files Access granted — direct path polling active</string>
     <string name="all_files_not_granted">⚠ All Files Access not granted — Downloads uses MediaStore fallback</string>
     <string name="all_files_not_needed">All Files Access not applicable on this Android version</string>
+    <string name="request_all_files">Grant All Files Access (needed for Downloads direct poll)</string>
+
+    <!-- Watch control -->
     <string name="start_watching">Start Watching</string>
     <string name="stop_watching">Stop Watching</string>
-    <string name="no_folder">No folder selected</string>
-    <string name="event_log_label">File events (last 20):</string>
-    <string name="last_proposal">Last proposal:</string>
+    <string name="scan_now">Scan Now</string>
     <string name="service_running">Service: Running</string>
     <string name="service_stopped">Service: Stopped</string>
+
+    <!-- Logs / files -->
+    <string name="live_log_label">Live events (last 30):</string>
+    <string name="recent_files_label">Recent files (DB, last 20):</string>
+    <string name="no_files_yet">No files detected yet</string>
+    <string name="debug_log_label">Debug log (DB, last 80):</string>
+    <string name="clear">Clear</string>
+    <string name="last_proposal">Last proposal:</string>
+
+    <!-- Notification -->
     <string name="notification_channel_name">FileAssistant Watcher</string>
     <string name="notification_title">FileAssistant</string>
     <string name="notification_text">Watching for file changes…</string>
