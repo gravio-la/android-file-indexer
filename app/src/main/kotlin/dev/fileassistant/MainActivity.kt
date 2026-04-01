@@ -226,7 +226,7 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svcIntent)
         else startService(svcIntent)
 
-        val action = { watcherService?.startWatchAll() }
+        val action: () -> Unit = { watcherService?.startWatchAll() }
         if (serviceBound) {
             action()
         } else {
