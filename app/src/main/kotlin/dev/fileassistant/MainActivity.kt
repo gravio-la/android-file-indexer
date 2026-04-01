@@ -14,11 +14,21 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.IBinder
 import android.provider.Settings
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import dev.fileassistant.databinding.ActivityMainBinding
+import dev.fileassistant.db.AppDatabase
+import dev.fileassistant.db.WatchedDirectory
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
@@ -28,29 +38,48 @@ class MainActivity : AppCompatActivity() {
     private var serviceBound = false
     private var bindRequested = false
     private var isWatching = false
-    private var pendingWatchAction: (() -> Unit)? = null
+    private var pendingAction: (() -> Unit)? = null
 
-    private val eventLog = ArrayDeque<String>()
+    // Live event log (last 30 lines, shown in the always-visible event section)
+    private val liveLog = ArrayDeque<String>()
 
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, service: IBinder) {
-            watcherService = (service as WatcherService.LocalBinder).getService()
+    private val ts = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+
+    // ── Service connection ────────────────────────────────────────────────────
+
+    private val serviceConn = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+            watcherService = (binder as WatcherService.LocalBinder).getService()
             serviceBound = true
             bindRequested = false
-            pendingWatchAction?.invoke()
-            pendingWatchAction = null
-            // Sync button state if the service was already watching (e.g. after boot-restart)
-            if (watcherService?.isWatching == true && !isWatching) {
-                isWatching = true
-                binding.toggleWatchButton.text = getString(R.string.stop_watching)
-                binding.serviceStatusText.text = getString(R.string.service_running)
-            }
+            pendingAction?.invoke()
+            pendingAction = null
+            syncWatchButtonState()
+            refreshDirsView()
+            refreshFilesView()
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
             watcherService = null
             serviceBound = false
             bindRequested = false
+        }
+    }
+
+    // ── Broadcast receivers ───────────────────────────────────────────────────
+
+    private val eventReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val msg = intent.getStringExtra(WatcherService.EXTRA_EVENT_LOG) ?: return
+            val line = "${ts.format(Date())} $msg"
+            if (liveLog.size >= 30) liveLog.removeFirst()
+            liveLog.addLast(line)
+            binding.eventLogText.text = liveLog.joinToString("\n")
+
+            // If debug panel is open, refresh it too
+            if (binding.debugContainer.tag == "open") refreshDebugLog()
+            // Refresh file list on actual file events
+            if (msg.startsWith("[FILE_CREATED]")) refreshFilesView()
         }
     }
 
@@ -61,31 +90,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private val fileEventReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            val msg = intent.getStringExtra(WatcherService.EXTRA_EVENT_LOG) ?: return
-            if (eventLog.size >= 20) eventLog.removeFirst()
-            eventLog.addLast(msg)
-            binding.eventLogText.text = eventLog.joinToString("\n")
-        }
-    }
+    // ── Activity result launchers ─────────────────────────────────────────────
 
-    private val folderPickerLauncher =
+    private val safLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-            if (uri != null) {
-                contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                )
-                prefs().edit()
-                    .putString(WatcherService.PREF_WATCH_MODE, WatcherService.WATCH_MODE_SAF)
-                    .putString(WatcherService.PREF_WATCH_URI, uri.toString())
-                    .apply()
-                binding.folderUriText.text = uri.toString()
+            if (uri == null) return@registerForActivityResult
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            val name = uri.lastPathSegment?.substringAfterLast(':')
+                ?: uri.toString().takeLast(30)
+            val dir = WatchedDirectory(
+                uri = uri.toString(),
+                displayName = name,
+                mode = WatcherService.WATCH_MODE_SAF
+            )
+            if (serviceBound) {
+                watcherService?.addDirectory(dir)
+            } else {
+                AppDatabase.get(this).dao().insertDir(dir)
             }
+            refreshDirsView()
         }
 
-    private val notificationPermLauncher =
+    private val notifPermLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     private val mediaPermLauncher =
@@ -93,103 +122,120 @@ class MainActivity : AppCompatActivity() {
 
     private val allFilesLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            updateAllFilesAccessStatus()
+            updateAllFilesStatus()
         }
+
+    // ── onCreate ──────────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        requestNotificationPermIfNeeded()
+        requestNotifPermIfNeeded()
 
-        // Restore displayed folder label
-        val p = prefs()
-        when (p.getString(WatcherService.PREF_WATCH_MODE, null)) {
-            WatcherService.WATCH_MODE_SAF ->
-                binding.folderUriText.text =
-                    p.getString(WatcherService.PREF_WATCH_URI, null) ?: getString(R.string.no_folder)
-            WatcherService.WATCH_MODE_DOWNLOADS ->
-                binding.folderUriText.text = getString(R.string.downloads_folder)
-        }
+        // ── Directories section ──
+        binding.toggleDirsButton.setOnClickListener { togglePanel(binding.dirsContainer, "dirs") }
 
-        binding.chooseFolderButton.setOnClickListener {
-            folderPickerLauncher.launch(null)
-        }
+        binding.addSafButton.setOnClickListener { safLauncher.launch(null) }
 
-        binding.watchDownloadsButton.setOnClickListener {
+        binding.addDownloadsButton.setOnClickListener {
             requestMediaPermsIfNeeded()
-            prefs().edit()
-                .putString(WatcherService.PREF_WATCH_MODE, WatcherService.WATCH_MODE_DOWNLOADS)
-                .apply()
-            binding.folderUriText.text = getString(R.string.downloads_folder)
+            val dlPath = Environment
+                .getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                .absolutePath
+            val dir = WatchedDirectory(
+                uri = dlPath,
+                displayName = "Downloads",
+                mode = WatcherService.WATCH_MODE_DOWNLOADS
+            )
+            if (serviceBound) {
+                watcherService?.addDirectory(dir)
+            } else {
+                AppDatabase.get(this).dao().insertDir(dir)
+            }
+            refreshDirsView()
         }
 
+        // ── All-files access ──
         binding.requestAllFilesButton.setOnClickListener {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 allFilesLauncher.launch(
-                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                        Uri.parse("package:$packageName"))
+                    Intent(
+                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
                 )
             }
         }
 
+        // ── Watch control ──
         binding.toggleWatchButton.setOnClickListener {
             if (isWatching) stopWatching() else startWatching()
+        }
+
+        binding.scanNowButton.setOnClickListener {
+            if (serviceBound) watcherService?.scanNow()
+            else liveAppend("[W] Not connected to service yet")
+        }
+
+        // ── Debug log ──
+        binding.toggleDebugButton.setOnClickListener {
+            togglePanel(binding.debugContainer, "debug")
+            if (binding.debugContainer.tag == "open") refreshDebugLog()
+        }
+
+        binding.clearDebugButton.setOnClickListener {
+            // Wipe debug log from DB and clear UI
+            AppDatabase.get(this).dao().pruneDebugLog()
+            binding.debugLogText.text = "—"
         }
     }
 
     override fun onResume() {
         super.onResume()
         val lbm = LocalBroadcastManager.getInstance(this)
+        lbm.registerReceiver(eventReceiver, IntentFilter(WatcherService.ACTION_FILE_EVENT))
         lbm.registerReceiver(proposalReceiver, IntentFilter(WatcherService.ACTION_PROPOSAL))
-        lbm.registerReceiver(fileEventReceiver, IntentFilter(WatcherService.ACTION_FILE_EVENT))
         bindWatcherService()
-        updateAllFilesAccessStatus()
+        updateAllFilesStatus()
+        refreshDirsView()
+        refreshFilesView()
     }
 
     override fun onPause() {
         val lbm = LocalBroadcastManager.getInstance(this)
+        lbm.unregisterReceiver(eventReceiver)
         lbm.unregisterReceiver(proposalReceiver)
-        lbm.unregisterReceiver(fileEventReceiver)
         super.onPause()
     }
 
     override fun onDestroy() {
         if (serviceBound || bindRequested) {
-            unbindService(serviceConnection)
+            unbindService(serviceConn)
             serviceBound = false
             bindRequested = false
         }
         super.onDestroy()
     }
 
+    // ── Watch control ─────────────────────────────────────────────────────────
+
     private fun startWatching() {
-        val p = prefs()
-        val mode = p.getString(WatcherService.PREF_WATCH_MODE, null) ?: return
-        val uri  = p.getString(WatcherService.PREF_WATCH_URI, null)?.let { Uri.parse(it) }
-        if (mode == WatcherService.WATCH_MODE_SAF && uri == null) return
+        val svcIntent = Intent(this, WatcherService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svcIntent)
+        else startService(svcIntent)
 
-        val serviceIntent = Intent(this, WatcherService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
-        else startService(serviceIntent)
-
-        val action: () -> Unit = if (mode == WatcherService.WATCH_MODE_DOWNLOADS) {
-            { watcherService?.startWatchingDownloads() }
-        } else {
-            { watcherService?.startWatchingUri(uri!!) }
-        }
-
+        val action = { watcherService?.startWatchAll() }
         if (serviceBound) {
             action()
         } else {
-            pendingWatchAction = action
+            pendingAction = action
             if (!bindRequested) {
                 bindRequested = true
-                bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+                bindService(svcIntent, serviceConn, Context.BIND_AUTO_CREATE)
             }
         }
-
         isWatching = true
         binding.toggleWatchButton.text = getString(R.string.stop_watching)
         binding.serviceStatusText.text = getString(R.string.service_running)
@@ -202,15 +248,108 @@ class MainActivity : AppCompatActivity() {
         binding.serviceStatusText.text = getString(R.string.service_stopped)
     }
 
-    private fun bindWatcherService() {
-        if (!serviceBound && !bindRequested) {
-            bindRequested = true
-            bindService(Intent(this, WatcherService::class.java),
-                serviceConnection, Context.BIND_AUTO_CREATE)
+    private fun syncWatchButtonState() {
+        val watching = watcherService?.isWatching ?: return
+        if (watching && !isWatching) {
+            isWatching = true
+            binding.toggleWatchButton.text = getString(R.string.stop_watching)
+            binding.serviceStatusText.text = getString(R.string.service_running)
         }
     }
 
-    private fun updateAllFilesAccessStatus() {
+    private fun bindWatcherService() {
+        if (!serviceBound && !bindRequested) {
+            bindRequested = true
+            bindService(
+                Intent(this, WatcherService::class.java),
+                serviceConn,
+                Context.BIND_AUTO_CREATE
+            )
+        }
+    }
+
+    // ── Directories view ──────────────────────────────────────────────────────
+
+    private fun refreshDirsView() {
+        val dirs = AppDatabase.get(this).dao().getAllDirs()
+        binding.dirsContainer.removeAllViews()
+
+        if (dirs.isEmpty()) {
+            binding.dirsContainer.addView(
+                TextView(this).apply { text = getString(R.string.no_dirs_yet); setPadding(0, 4, 0, 4) }
+            )
+            return
+        }
+
+        for (dir in dirs) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).also { it.bottomMargin = 4.dp }
+            }
+
+            val fileCount = AppDatabase.get(this).dao().fileCountForDir(dir.id)
+            val label = "${dir.displayName}  [${dir.mode}]  •  $fileCount file(s)"
+            val tv = TextView(this).apply {
+                text = label
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                textSize = 12f
+            }
+
+            val removeBtn = Button(this).apply {
+                text = "✕"
+                textSize = 11f
+                setPadding(16, 4, 16, 4)
+                setOnClickListener {
+                    if (serviceBound) watcherService?.removeDirectory(dir.id)
+                    else AppDatabase.get(this@MainActivity).dao().deleteDir(dir.id)
+                    refreshDirsView()
+                }
+            }
+
+            row.addView(tv)
+            row.addView(removeBtn)
+            binding.dirsContainer.addView(row)
+        }
+    }
+
+    // ── Files view ────────────────────────────────────────────────────────────
+
+    private fun refreshFilesView() {
+        val files = AppDatabase.get(this).dao().getRecentFiles(20)
+        if (files.isEmpty()) {
+            binding.recentFilesText.text = getString(R.string.no_files_yet)
+            return
+        }
+        binding.recentFilesText.text = files.joinToString("\n") { f ->
+            "${ts.format(Date(f.detectedAt))} ${f.displayName}"
+        }
+    }
+
+    // ── Debug log view ────────────────────────────────────────────────────────
+
+    private fun refreshDebugLog() {
+        val logs = AppDatabase.get(this).dao().getRecentLogs(80)
+        if (logs.isEmpty()) { binding.debugLogText.text = "—"; return }
+        binding.debugLogText.text = logs.joinToString("\n") { e ->
+            "${ts.format(Date(e.timestamp))} [${e.level}] ${e.message}"
+        }
+    }
+
+    // ── Panel toggle ──────────────────────────────────────────────────────────
+
+    private fun togglePanel(container: LinearLayout, key: String) {
+        val isOpen = container.tag == "open"
+        container.visibility = if (isOpen) android.view.View.GONE else android.view.View.VISIBLE
+        container.tag = if (isOpen) "closed" else "open"
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private fun updateAllFilesStatus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val granted = Environment.isExternalStorageManager()
             binding.allFilesStatusText.text = getString(
@@ -223,14 +362,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun prefs() = getSharedPreferences(WatcherService.PREFS_NAME, Context.MODE_PRIVATE)
+    private fun liveAppend(msg: String) {
+        val line = "${ts.format(Date())} $msg"
+        if (liveLog.size >= 30) liveLog.removeFirst()
+        liveLog.addLast(line)
+        binding.eventLogText.text = liveLog.joinToString("\n")
+    }
 
-    private fun requestNotificationPermIfNeeded() {
+    private val Int.dp get() = (this * resources.displayMetrics.density).toInt()
+
+    private fun requestNotifPermIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -240,7 +386,9 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.READ_MEDIA_IMAGES,
                 Manifest.permission.READ_MEDIA_VIDEO,
                 Manifest.permission.READ_MEDIA_AUDIO
-            ).filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+            ).filter {
+                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+            }
             if (needed.isNotEmpty()) mediaPermLauncher.launch(needed.toTypedArray())
         }
     }
